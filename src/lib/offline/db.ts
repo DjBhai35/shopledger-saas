@@ -1,8 +1,22 @@
 import { openDB, DBSchema, IDBPDatabase } from "idb";
-import { SyncQueueItem, LocalAuditNote, Workspace } from "@/types";
+import {
+  SyncQueueItem,
+  LocalAuditNote,
+  Workspace,
+  Product,
+  StockMovement,
+  Customer,
+  Supplier,
+  Sale,
+  Purchase,
+  CustomerLedgerEntry,
+  SupplierLedgerEntry,
+  Expense,
+  OperationJournalRecord,
+} from "@/types";
 
 const DB_NAME = "shopledger_local_db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface ShopLedgerDBSchema extends DBSchema {
   workspaces: {
@@ -26,6 +40,87 @@ export interface ShopLedgerDBSchema extends DBSchema {
       by_created: number;
     };
   };
+  products: {
+    key: string;
+    value: Product;
+    indexes: {
+      by_workspace: string;
+      by_sku: string;
+      by_barcode: string;
+    };
+  };
+  stock_movements: {
+    key: string;
+    value: StockMovement;
+    indexes: {
+      by_workspace: string;
+      by_product: string;
+      by_created: number;
+    };
+  };
+  customers: {
+    key: string;
+    value: Customer;
+    indexes: {
+      by_workspace: string;
+    };
+  };
+  suppliers: {
+    key: string;
+    value: Supplier;
+    indexes: {
+      by_workspace: string;
+    };
+  };
+  sales: {
+    key: string;
+    value: Sale;
+    indexes: {
+      by_workspace: string;
+      by_created: number;
+    };
+  };
+  purchases: {
+    key: string;
+    value: Purchase;
+    indexes: {
+      by_workspace: string;
+      by_created: number;
+    };
+  };
+  customer_ledger: {
+    key: string;
+    value: CustomerLedgerEntry;
+    indexes: {
+      by_workspace: string;
+      by_customer: string;
+      by_date: number;
+    };
+  };
+  supplier_ledger: {
+    key: string;
+    value: SupplierLedgerEntry;
+    indexes: {
+      by_workspace: string;
+      by_supplier: string;
+      by_date: number;
+    };
+  };
+  expenses: {
+    key: string;
+    value: Expense;
+    indexes: {
+      by_workspace: string;
+      by_date: number;
+    };
+  };
+  operation_journal: {
+    key: string;
+    value: OperationJournalRecord;
+    indexes: {
+      by_workspace: string;
+    };
+  };
   cache_store: {
     key: string;
     value: {
@@ -40,32 +135,95 @@ let dbPromise: Promise<IDBPDatabase<ShopLedgerDBSchema>> | null = null;
 
 export function getLocalDB(): Promise<IDBPDatabase<ShopLedgerDBSchema>> {
   if (typeof window === "undefined" && typeof indexedDB === "undefined") {
-    // Return a dummy promise during SSR
     return Promise.reject(new Error("IndexedDB is only accessible in browser environment"));
   }
 
   if (!dbPromise) {
     dbPromise = openDB<ShopLedgerDBSchema>(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        if (!db.objectStoreNames.contains("workspaces")) {
-          db.createObjectStore("workspaces", { keyPath: "id" });
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          if (!db.objectStoreNames.contains("workspaces")) {
+            db.createObjectStore("workspaces", { keyPath: "id" });
+          }
+
+          if (!db.objectStoreNames.contains("sync_queue")) {
+            const syncStore = db.createObjectStore("sync_queue", { keyPath: "id" });
+            syncStore.createIndex("by_workspace", "workspaceId");
+            syncStore.createIndex("by_status", "status");
+            syncStore.createIndex("by_created", "createdAt");
+          }
+
+          if (!db.objectStoreNames.contains("audit_notes")) {
+            const noteStore = db.createObjectStore("audit_notes", { keyPath: "id" });
+            noteStore.createIndex("by_workspace", "workspaceId");
+            noteStore.createIndex("by_created", "createdAt");
+          }
+
+          if (!db.objectStoreNames.contains("cache_store")) {
+            db.createObjectStore("cache_store", { keyPath: "key" });
+          }
         }
 
-        if (!db.objectStoreNames.contains("sync_queue")) {
-          const syncStore = db.createObjectStore("sync_queue", { keyPath: "id" });
-          syncStore.createIndex("by_workspace", "workspaceId");
-          syncStore.createIndex("by_status", "status");
-          syncStore.createIndex("by_created", "createdAt");
+        // Version 2 stores
+        if (!db.objectStoreNames.contains("products")) {
+          const store = db.createObjectStore("products", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_sku", "sku");
+          store.createIndex("by_barcode", "barcode");
         }
 
-        if (!db.objectStoreNames.contains("audit_notes")) {
-          const noteStore = db.createObjectStore("audit_notes", { keyPath: "id" });
-          noteStore.createIndex("by_workspace", "workspaceId");
-          noteStore.createIndex("by_created", "createdAt");
+        if (!db.objectStoreNames.contains("stock_movements")) {
+          const store = db.createObjectStore("stock_movements", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_product", "productId");
+          store.createIndex("by_created", "createdAt");
         }
 
-        if (!db.objectStoreNames.contains("cache_store")) {
-          db.createObjectStore("cache_store", { keyPath: "key" });
+        if (!db.objectStoreNames.contains("customers")) {
+          const store = db.createObjectStore("customers", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+        }
+
+        if (!db.objectStoreNames.contains("suppliers")) {
+          const store = db.createObjectStore("suppliers", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+        }
+
+        if (!db.objectStoreNames.contains("sales")) {
+          const store = db.createObjectStore("sales", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_created", "createdAt");
+        }
+
+        if (!db.objectStoreNames.contains("purchases")) {
+          const store = db.createObjectStore("purchases", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_created", "createdAt");
+        }
+
+        if (!db.objectStoreNames.contains("customer_ledger")) {
+          const store = db.createObjectStore("customer_ledger", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_customer", "customerId");
+          store.createIndex("by_date", "date");
+        }
+
+        if (!db.objectStoreNames.contains("supplier_ledger")) {
+          const store = db.createObjectStore("supplier_ledger", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_supplier", "supplierId");
+          store.createIndex("by_date", "date");
+        }
+
+        if (!db.objectStoreNames.contains("expenses")) {
+          const store = db.createObjectStore("expenses", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_date", "date");
+        }
+
+        if (!db.objectStoreNames.contains("operation_journal")) {
+          const store = db.createObjectStore("operation_journal", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
         }
       },
     });
@@ -74,9 +232,6 @@ export function getLocalDB(): Promise<IDBPDatabase<ShopLedgerDBSchema>> {
   return dbPromise;
 }
 
-/**
- * Cleanly reset connection for tests
- */
 export function resetDBConnection(): void {
   dbPromise = null;
 }

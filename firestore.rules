@@ -38,6 +38,14 @@ service cloud.firestore {
       return hasWorkspaceRole(workspaceId, ['owner']);
     }
 
+    function isWorkspaceAdminOrHigher(workspaceId) {
+      return hasWorkspaceRole(workspaceId, ['owner', 'admin']);
+    }
+
+    function isWorkspaceManagerOrHigher(workspaceId) {
+      return hasWorkspaceRole(workspaceId, ['owner', 'admin', 'manager']);
+    }
+
     // -------------------------------------------------------------------------
     // Users Collection
     // -------------------------------------------------------------------------
@@ -45,28 +53,20 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId);
       allow update: if isOwner(userId);
-      allow delete: if false; // Deletion handled via Admin SDK / Auth triggers
+      allow delete: if false;
     }
 
     // -------------------------------------------------------------------------
     // Workspaces Collection
     // -------------------------------------------------------------------------
     match /workspaces/{workspaceId} {
-      // Members can read their workspace details
       allow read: if isWorkspaceMember(workspaceId);
-
-      // Authenticated users can create a workspace if they are the declared owner
       allow create: if isAuthenticated() &&
         request.resource.data.ownerUid == request.auth.uid &&
         request.resource.data.id == workspaceId;
-
-      // Only workspace owner or admin can update workspace settings/details
-      allow update: if hasWorkspaceRole(workspaceId, ['owner', 'admin']) &&
-        // Owner UID and Workspace ID cannot be mutated
+      allow update: if isWorkspaceAdminOrHigher(workspaceId) &&
         request.resource.data.ownerUid == resource.data.ownerUid &&
         request.resource.data.id == resource.data.id;
-
-      // Only owner can delete workspace
       allow delete: if isWorkspaceOwner(workspaceId);
     }
 
@@ -74,73 +74,145 @@ service cloud.firestore {
     // Memberships Collection
     // -------------------------------------------------------------------------
     match /memberships/{membershipId} {
-      // User can read their own memberships, or members can list colleagues in their workspace
       allow read: if isAuthenticated() && (
         resource.data.userId == request.auth.uid ||
         isWorkspaceMember(resource.data.workspaceId)
       );
-
-      // Create allowed if:
-      // 1. Initial workspace owner registration on onboarding
-      // 2. Or existing workspace owner adding a team member
       allow create: if isAuthenticated() && (
         (request.resource.data.userId == request.auth.uid &&
          request.resource.data.role == 'owner' &&
          request.resource.id == membershipDocId(request.resource.data.workspaceId, request.auth.uid)) ||
         isWorkspaceOwner(request.resource.data.workspaceId)
       );
-
-      // Only workspace owner can update roles/permissions (prevents self-elevation)
       allow update: if isAuthenticated() &&
         isWorkspaceOwner(resource.data.workspaceId) &&
         request.resource.data.userId == resource.data.userId &&
         request.resource.data.workspaceId == resource.data.workspaceId;
-
-      // Only workspace owner can delete/revoke membership
       allow delete: if isAuthenticated() &&
         isWorkspaceOwner(resource.data.workspaceId);
     }
 
     // -------------------------------------------------------------------------
-    // Subscriptions Collection (Privileged - Protected against tampering)
+    // Subscriptions Collection
     // -------------------------------------------------------------------------
     match /subscriptions/{subscriptionId} {
-      // Workspace members can view their active plan and limits
       allow read: if isWorkspaceMember(resource.data.workspaceId);
-
-      // Clients can ONLY initialize the default Free Starter plan on initial creation
       allow create: if isAuthenticated() &&
         request.resource.data.planId == 'free' &&
         request.resource.data.priceUSD == 0 &&
         request.resource.data.workspaceId != null &&
         isWorkspaceOwner(request.resource.data.workspaceId);
-
-      // Paid upgrades and plan updates CANNOT be written by client SDK!
-      // Must be performed by Firebase Admin SDK in Cloud Functions after verified payment.
-      allow update, delete: if false;
+      allow update, delete: if false; // Only server Admin SDK
     }
 
     // -------------------------------------------------------------------------
-    // Tenant Isolated Data (Audit notes, products, sales, etc.)
+    // Products Collection
     // -------------------------------------------------------------------------
-    match /audit_notes/{noteId} {
+    match /products/{productId} {
       allow read: if isWorkspaceMember(resource.data.workspaceId);
-      allow create: if isAuthenticated() &&
-        isWorkspaceMember(request.resource.data.workspaceId) &&
-        request.resource.data.authorUid == request.auth.uid;
-      allow update: if isAuthenticated() &&
-        isWorkspaceMember(resource.data.workspaceId) &&
-        (resource.data.authorUid == request.auth.uid || isWorkspaceOwner(resource.data.workspaceId));
-      allow delete: if hasWorkspaceRole(resource.data.workspaceId, ['owner', 'admin']);
+      allow create: if isWorkspaceManagerOrHigher(request.resource.data.workspaceId);
+      allow update: if isWorkspaceManagerOrHigher(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if isWorkspaceAdminOrHigher(resource.data.workspaceId);
     }
 
-    // Generic multi-tenant business entities pattern
-    match /{entityCollection}/{entityId} {
+    // -------------------------------------------------------------------------
+    // Stock Movements Collection
+    // -------------------------------------------------------------------------
+    match /stock_movements/{movementId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update, delete: if false; // Immutable audit trail
+    }
+
+    // -------------------------------------------------------------------------
+    // Customers Collection
+    // -------------------------------------------------------------------------
+    match /customers/{customerId} {
       allow read: if isWorkspaceMember(resource.data.workspaceId);
       allow create: if isWorkspaceMember(request.resource.data.workspaceId);
       allow update: if isWorkspaceMember(resource.data.workspaceId) &&
         request.resource.data.workspaceId == resource.data.workspaceId;
-      allow delete: if hasWorkspaceRole(resource.data.workspaceId, ['owner', 'admin']);
+      allow delete: if isWorkspaceAdminOrHigher(resource.data.workspaceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Suppliers Collection
+    // -------------------------------------------------------------------------
+    match /suppliers/{supplierId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceManagerOrHigher(request.resource.data.workspaceId);
+      allow update: if isWorkspaceManagerOrHigher(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if isWorkspaceAdminOrHigher(resource.data.workspaceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sales Collection
+    // -------------------------------------------------------------------------
+    match /sales/{saleId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update: if isWorkspaceManagerOrHigher(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if false; // Financial records cannot be deleted; must be refunded
+    }
+
+    // -------------------------------------------------------------------------
+    // Purchases Collection
+    // -------------------------------------------------------------------------
+    match /purchases/{purchaseId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceManagerOrHigher(request.resource.data.workspaceId);
+      allow update: if isWorkspaceManagerOrHigher(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Customer Ledger Collection
+    // -------------------------------------------------------------------------
+    match /customer_ledger/{ledgerId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update, delete: if false; // Immutable double-entry ledger
+    }
+
+    // -------------------------------------------------------------------------
+    // Supplier Ledger Collection
+    // -------------------------------------------------------------------------
+    match /supplier_ledger/{ledgerId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceManagerOrHigher(request.resource.data.workspaceId);
+      allow update, delete: if false; // Immutable ledger
+    }
+
+    // -------------------------------------------------------------------------
+    // Expenses Collection
+    // -------------------------------------------------------------------------
+    match /expenses/{expenseId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update: if isWorkspaceManagerOrHigher(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if isWorkspaceAdminOrHigher(resource.data.workspaceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Audit Notes & Operation Journal
+    // -------------------------------------------------------------------------
+    match /audit_notes/{noteId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update: if isWorkspaceMember(resource.data.workspaceId) &&
+        (resource.data.authorUid == request.auth.uid || isWorkspaceOwner(resource.data.workspaceId));
+      allow delete: if isWorkspaceAdminOrHigher(resource.data.workspaceId);
+    }
+
+    match /operation_journal/{journalId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update, delete: if false; // Immutable idempotency journal
     }
   }
 }

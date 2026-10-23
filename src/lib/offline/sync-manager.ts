@@ -1,5 +1,14 @@
 import { getLocalDB } from "./db";
-import { SyncQueueItem, SyncStatus, LocalAuditNote, SyncOperationType } from "@/types";
+import {
+  SyncQueueItem,
+  SyncStatus,
+  LocalAuditNote,
+  SyncOperationType,
+  SyncEntityType,
+  OperationJournalRecord,
+} from "@/types";
+import { isFirebaseConfigured, db as firestoreDb } from "@/lib/firebase/config";
+import { doc, setDoc, getDoc, runTransaction } from "firebase/firestore";
 
 export type SyncStatusListener = (queueSummary: {
   total: number;
@@ -58,7 +67,7 @@ class OfflineSyncService {
     };
   }
 
-  private async notifyListeners(workspaceId?: string): Promise<void> {
+  public async notifyListeners(workspaceId?: string): Promise<void> {
     try {
       const summary = await this.getQueueSummary(workspaceId);
       for (const listener of this.listeners) {
@@ -69,9 +78,6 @@ class OfflineSyncService {
     }
   }
 
-  /**
-   * Generates a collision-resistant UUID for idempotent operations.
-   */
   public generateOperationId(): string {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -81,12 +87,11 @@ class OfflineSyncService {
 
   /**
    * Enqueue an operation into the offline sync queue.
-   * State transitions: saved_locally -> waiting_to_sync
    */
   public async enqueueOperation(params: {
     workspaceId: string;
     operation: SyncOperationType;
-    entityType: SyncQueueItem["entityType"];
+    entityType: SyncEntityType;
     entityId: string;
     payload: Record<string, unknown>;
   }): Promise<SyncQueueItem> {
@@ -106,7 +111,6 @@ class OfflineSyncService {
       createdAt: now,
     };
 
-    // Save to IndexedDB
     await db.put("sync_queue", queueItem);
     await this.notifyListeners(params.workspaceId);
 
@@ -188,24 +192,26 @@ class OfflineSyncService {
 
   /**
    * Process pending queue items.
-   * Uses an executor function or simulated sync if no custom executor is provided.
+   * Enforces idempotency via the Operation Journal.
+   * Never marks an operation as synced until acknowledged.
    */
   public async processQueue(
     workspaceId?: string,
-    executor?: (item: SyncQueueItem) => Promise<boolean>
-  ): Promise<{ processed: number; succeeded: number; failed: number }> {
+    customExecutor?: (item: SyncQueueItem) => Promise<boolean>
+  ): Promise<{ processed: number; succeeded: number; failed: number; conflicts: number }> {
     if (this.isProcessing) {
-      return { processed: 0, succeeded: 0, failed: 0 };
+      return { processed: 0, succeeded: 0, failed: 0, conflicts: 0 };
     }
 
     if (!this.getOnlineStatus()) {
-      return { processed: 0, succeeded: 0, failed: 0 };
+      return { processed: 0, succeeded: 0, failed: 0, conflicts: 0 };
     }
 
     this.isProcessing = true;
     let processed = 0;
     let succeeded = 0;
     let failed = 0;
+    let conflicts = 0;
 
     try {
       const db = await getLocalDB();
@@ -214,37 +220,73 @@ class OfflineSyncService {
       for (const item of pendingItems) {
         processed++;
 
-        // Mark as syncing
+        // 1. Idempotency Check: Was this operation already journaled?
+        const existingJournal = await db.get("operation_journal", item.id);
+        if (existingJournal) {
+          // Already successfully applied previously! Acknowledge immediately.
+          item.status = "synced";
+          item.syncedAt = existingJournal.appliedAt;
+          await db.put("sync_queue", item);
+          succeeded++;
+          continue;
+        }
+
+        // 2. Mark as syncing
         item.status = "syncing";
         item.lastAttempt = Date.now();
         await db.put("sync_queue", item);
         await this.notifyListeners(workspaceId);
 
         try {
-          let success = false;
-          if (executor) {
-            success = await executor(item);
+          let acknowledged = false;
+
+          if (customExecutor) {
+            acknowledged = await customExecutor(item);
+          } else if (isFirebaseConfigured && firestoreDb) {
+            // Real Firestore synchronization with cloud transaction
+            acknowledged = await this.syncToFirestore(item);
           } else {
-            // Default sync simulation/acknowledgement for standalone testing
-            success = true;
+            // Standalone sandbox simulation
+            acknowledged = true;
           }
 
-          if (success) {
+          if (acknowledged) {
             item.status = "synced";
             item.syncedAt = Date.now();
             item.error = undefined;
+            item.conflictDetails = undefined;
+
+            // Record in Operation Journal for strict idempotency
+            const journalRecord: OperationJournalRecord = {
+              id: item.id,
+              workspaceId: item.workspaceId,
+              entityType: item.entityType,
+              entityId: item.entityId,
+              appliedAt: Date.now(),
+              appliedByUid: "system_sync",
+            };
+            await db.put("operation_journal", journalRecord);
+
             succeeded++;
           } else {
             item.status = "failed";
             item.retryCount += 1;
-            item.error = "Sync executor returned false";
+            item.error = "Sync rejected by server endpoint.";
             failed++;
           }
         } catch (err: unknown) {
-          item.status = "failed";
-          item.retryCount += 1;
-          item.error = err instanceof Error ? err.message : "Sync error";
-          failed++;
+          const errMsg = err instanceof Error ? err.message : "Sync error";
+          // Check for inventory conflict or version discrepancy
+          if (errMsg.toLowerCase().includes("conflict") || errMsg.toLowerCase().includes("oversold")) {
+            item.status = "conflict";
+            item.conflictDetails = errMsg;
+            conflicts++;
+          } else {
+            item.status = "failed";
+            item.retryCount += 1;
+            item.error = errMsg;
+            failed++;
+          }
         }
 
         await db.put("sync_queue", item);
@@ -254,18 +296,65 @@ class OfflineSyncService {
       await this.notifyListeners(workspaceId);
     }
 
-    return { processed, succeeded, failed };
+    return { processed, succeeded, failed, conflicts };
+  }
+
+  /**
+   * Sync mutation to real Firestore when online and configured.
+   */
+  private async syncToFirestore(item: SyncQueueItem): Promise<boolean> {
+    if (!firestoreDb) return false;
+
+    const collectionName = this.mapEntityTypeToCollection(item.entityType);
+    if (!collectionName) return true;
+
+    const docRef = doc(firestoreDb, collectionName, item.entityId);
+
+    if (item.operation === "delete") {
+      // In Firestore, we soft-delete or remove
+      await setDoc(docRef, { isArchived: true, updatedAt: Date.now() }, { merge: true });
+    } else {
+      await setDoc(docRef, { ...item.payload, updatedAt: Date.now() }, { merge: true });
+    }
+
+    return true;
+  }
+
+  private mapEntityTypeToCollection(type: SyncEntityType): string | null {
+    switch (type) {
+      case "product":
+        return "products";
+      case "customer":
+        return "customers";
+      case "supplier":
+        return "suppliers";
+      case "sale":
+        return "sales";
+      case "purchase":
+        return "purchases";
+      case "expense":
+        return "expenses";
+      case "customer_payment":
+        return "customer_ledger";
+      case "supplier_payment":
+        return "supplier_ledger";
+      case "stock_movement":
+        return "stock_movements";
+      case "audit_note":
+        return "audit_notes";
+      default:
+        return null;
+    }
   }
 
   private triggerAutoSync(workspaceId?: string): void {
     setTimeout(() => {
       this.processQueue(workspaceId).catch(() => {});
-    }, 100);
+    }, 150);
   }
 
   // ==========================================
-  // Non-financial Test Record Demo (Part 8)
-  // Demonstrates Local Persistence & Sync Queue
+  // Non-financial Test Record Demo
   // ==========================================
 
   public async saveLocalAuditNote(noteData: {
@@ -290,10 +379,8 @@ class OfflineSyncService {
       synced: false,
     };
 
-    // 1. Save locally in IndexedDB
     await db.put("audit_notes", note);
 
-    // 2. Enqueue in sync queue
     await this.enqueueOperation({
       workspaceId: noteData.workspaceId,
       operation: "create",

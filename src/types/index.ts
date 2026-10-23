@@ -99,8 +99,8 @@ export interface SubscriptionFeatures {
 }
 
 export interface SubscriptionLimits {
-  maxProducts: number; // e.g. 50 for free, 1000 for growth, unlimited for enterprise
-  maxMonthlyInvoices: number; // e.g. 100 for free
+  maxProducts: number;
+  maxMonthlyInvoices: number;
   maxCustomers: number;
   maxStaffAccounts: number;
 }
@@ -126,16 +126,362 @@ export interface WorkspaceSubscription {
   priceUSD: number;
   durationMonths: number;
   startDate: number;
-  expiryDate: number; // 0 or far-future for free
+  expiryDate: number;
   features: SubscriptionFeatures;
   limits: SubscriptionLimits;
   autoRenew: boolean;
   updatedAt: number;
 }
 
-/**
- * Offline Sync Queue Types
- */
+// =============================================================================
+// PRODUCTS & INVENTORY TYPES (Prompt 2)
+// =============================================================================
+
+export type ProductUnit =
+  | "pcs"
+  | "box"
+  | "packet"
+  | "kg"
+  | "g"
+  | "litre"
+  | "ml"
+  | "meter"
+  | "dozen"
+  | "carton"
+  | "pair"
+  | "unit";
+
+export interface MobileAttributes {
+  brand?: string;
+  model?: string;
+  imei?: string;
+  storage?: string;
+  color?: string;
+  warranty?: string;
+  condition?: "new" | "used" | "refurbished";
+}
+
+export interface RepairAttributes {
+  deviceModel?: string;
+  repairPartType?: string;
+  serviceCharge?: number;
+  repairStatus?: "pending" | "in_progress" | "completed" | "delivered";
+}
+
+export interface ClothingAttributes {
+  size?: string;
+  color?: string;
+  style?: string;
+  fabric?: string;
+}
+
+export interface GroceryAttributes {
+  batchNumber?: string;
+  expiryDate?: number;
+  weightVolume?: string;
+}
+
+export interface ElectronicsAttributes {
+  model?: string;
+  manufacturer?: string;
+  serialNumber?: string;
+  warrantyMonths?: number;
+}
+
+export interface WholesaleAttributes {
+  minOrderQty?: number;
+  wholesalePrice?: number;
+  cartonQuantity?: number;
+}
+
+export interface Product {
+  id: string;
+  workspaceId: string;
+  name: string;
+  sku: string;
+  barcode?: string;
+  category: string;
+  brand?: string;
+  costPrice: number;
+  sellingPrice: number;
+  quantity: number;
+  minStockAlert: number;
+  unit: ProductUnit;
+  description?: string;
+  imageUrl?: string;
+  isArchived: boolean;
+  // Category-specific optional metadata
+  mobileAttributes?: MobileAttributes;
+  repairAttributes?: RepairAttributes;
+  clothingAttributes?: ClothingAttributes;
+  groceryAttributes?: GroceryAttributes;
+  electronicsAttributes?: ElectronicsAttributes;
+  wholesaleAttributes?: WholesaleAttributes;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type StockMovementType =
+  | "purchase"
+  | "sale"
+  | "sale_return"
+  | "purchase_return"
+  | "adjustment"
+  | "damage"
+  | "opening";
+
+export interface StockMovement {
+  id: string;
+  workspaceId: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  type: StockMovementType;
+  quantityChange: number; // positive or negative
+  previousQuantity: number;
+  newQuantity: number;
+  unitCost: number;
+  referenceId?: string; // invoiceId, purchaseId, etc.
+  reason: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+// =============================================================================
+// CUSTOMERS & SUPPLIERS TYPES (Prompt 2)
+// =============================================================================
+
+export interface Customer {
+  id: string;
+  workspaceId: string;
+  name: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  openingBalance: number; // positive means customer owes business
+  currentBalance: number; // positive: owed to business (receivable)
+  isArchived: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Supplier {
+  id: string;
+  workspaceId: string;
+  name: string;
+  contactPerson?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  openingBalance: number; // positive means business owes supplier (payable)
+  currentPayableBalance: number; // positive: payable balance
+  isArchived: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// =============================================================================
+// SALES & POS TYPES (Prompt 2)
+// =============================================================================
+
+export type PaymentMethod =
+  | "cash"
+  | "card"
+  | "credit_udhar"
+  | "bank_transfer"
+  | "split";
+
+export interface SaleItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  barcode?: string;
+  quantity: number;
+  unit: ProductUnit;
+  unitCost: number;
+  unitPrice: number;
+  discount: number; // per item discount amount
+  total: number; // (unitPrice - discount) * quantity
+  returnedQuantity?: number;
+}
+
+export interface Sale {
+  id: string;
+  workspaceId: string;
+  invoiceNumber: string;
+  customerId: string | null; // null for walk-in cash customer
+  customerName: string;
+  items: SaleItem[];
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number; // totalAmount - paidAmount (if > 0, recorded in customer ledger)
+  paymentMethod: PaymentMethod;
+  paymentDetails?: string;
+  status: "completed" | "cancelled" | "refunded";
+  notes?: string;
+  createdByUid: string;
+  offlineOpId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SaleReturn {
+  id: string;
+  workspaceId: string;
+  originalSaleId: string;
+  invoiceNumber: string;
+  customerId: string | null;
+  items: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    total: number;
+  }[];
+  refundAmount: number;
+  reason: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+// =============================================================================
+// PURCHASES & STOCK INWARD TYPES (Prompt 2)
+// =============================================================================
+
+export interface PurchaseItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitCost: number;
+  total: number;
+  returnedQuantity?: number;
+}
+
+export interface Purchase {
+  id: string;
+  workspaceId: string;
+  purchaseNumber: string;
+  supplierId: string;
+  supplierName: string;
+  items: PurchaseItem[];
+  subtotal: number;
+  discountTotal: number;
+  taxTotal: number;
+  totalAmount: number;
+  paidAmount: number;
+  balanceDue: number; // totalAmount - paidAmount (payable balance)
+  paymentMethod: PaymentMethod;
+  status: "received" | "returned";
+  notes?: string;
+  createdByUid: string;
+  offlineOpId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PurchaseReturn {
+  id: string;
+  workspaceId: string;
+  originalPurchaseId: string;
+  purchaseNumber: string;
+  supplierId: string;
+  items: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitCost: number;
+    total: number;
+  }[];
+  refundAmount: number;
+  reason: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+// =============================================================================
+// CUSTOMER & SUPPLIER KHATA / LEDGER TYPES (Prompt 2)
+// =============================================================================
+
+export type CustomerLedgerType =
+  | "credit_sale"
+  | "payment_received"
+  | "sale_return"
+  | "opening_balance"
+  | "adjustment";
+
+export interface CustomerLedgerEntry {
+  id: string;
+  workspaceId: string;
+  customerId: string;
+  date: number;
+  type: CustomerLedgerType;
+  debit: number; // increases customer debt (e.g. credit sale)
+  credit: number; // decreases customer debt (e.g. cash payment, return)
+  runningBalance: number;
+  referenceId?: string; // invoiceNumber, receiptNumber
+  description: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+export type SupplierLedgerType =
+  | "purchase_credit"
+  | "payment_made"
+  | "purchase_return"
+  | "opening_balance"
+  | "adjustment";
+
+export interface SupplierLedgerEntry {
+  id: string;
+  workspaceId: string;
+  supplierId: string;
+  date: number;
+  type: SupplierLedgerType;
+  debit: number; // decreases debt owed to supplier (payment made, return)
+  credit: number; // increases debt owed to supplier (purchase credit)
+  runningBalance: number;
+  referenceId?: string; // purchaseNumber
+  description: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+// =============================================================================
+// BUSINESS EXPENSES TYPES (Prompt 2)
+// =============================================================================
+
+export type ExpenseCategory =
+  | "rent"
+  | "utilities"
+  | "salaries"
+  | "transport"
+  | "supplies"
+  | "repairs"
+  | "marketing"
+  | "custom";
+
+export interface Expense {
+  id: string;
+  workspaceId: string;
+  category: ExpenseCategory;
+  categoryLabel: string;
+  amount: number;
+  date: number;
+  paymentMethod: "cash" | "card" | "bank_transfer";
+  description: string;
+  receiptNumber?: string;
+  authorUid: string;
+  createdAt: number;
+}
+
+// =============================================================================
+// OFFLINE SYNC QUEUE & AUDIT TYPES
+// =============================================================================
+
 export type SyncOperationType = "create" | "update" | "delete";
 
 export type SyncStatus =
@@ -146,19 +492,44 @@ export type SyncStatus =
   | "failed"
   | "conflict";
 
+export type SyncEntityType =
+  | "product"
+  | "customer"
+  | "supplier"
+  | "sale"
+  | "sale_return"
+  | "purchase"
+  | "purchase_return"
+  | "customer_payment"
+  | "supplier_payment"
+  | "stock_movement"
+  | "expense"
+  | "audit_note"
+  | "setting";
+
 export interface SyncQueueItem {
   id: string; // Unique idempotency UUID
   workspaceId: string;
   operation: SyncOperationType;
-  entityType: "product" | "customer" | "sale" | "purchase" | "audit_note" | "setting";
+  entityType: SyncEntityType;
   entityId: string;
   payload: Record<string, unknown>;
   status: SyncStatus;
   retryCount: number;
   lastAttempt?: number;
   error?: string;
+  conflictDetails?: string;
   createdAt: number;
   syncedAt?: number;
+}
+
+export interface OperationJournalRecord {
+  id: string; // operation UUID
+  workspaceId: string;
+  entityType: SyncEntityType;
+  entityId: string;
+  appliedAt: number;
+  appliedByUid: string;
 }
 
 export interface LocalAuditNote {
