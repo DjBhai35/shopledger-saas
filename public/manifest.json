@@ -1,0 +1,24 @@
+{
+  "name": "ShopLedger - Shop & Wholesale SaaS",
+  "short_name": "ShopLedger",
+  "description": "Multi-Tenant Offline-First Shop and Wholesale Management SaaS",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#4f46e5",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function membershipDocId(workspaceId, uid) {
+      return 'mem_' + workspaceId + '_' + uid;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/memberships/$(membershipDocId(workspaceId, request.auth.uid)));
+    }
+
+    function getMembership(workspaceId) {
+      return get(/databases/$(database)/documents/memberships/$(membershipDocId(workspaceId, request.auth.uid))).data;
+    }
+
+    function hasWorkspaceRole(workspaceId, allowedRoles) {
+      return isWorkspaceMember(workspaceId) && 
+        getMembership(workspaceId).role in allowedRoles;
+    }
+
+    function isWorkspaceOwner(workspaceId) {
+      return hasWorkspaceRole(workspaceId, ['owner']);
+    }
+
+    // -------------------------------------------------------------------------
+    // Users Collection
+    // -------------------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if false; // Deletion handled via Admin SDK / Auth triggers
+    }
+
+    // -------------------------------------------------------------------------
+    // Workspaces Collection
+    // -------------------------------------------------------------------------
+    match /workspaces/{workspaceId} {
+      // Members can read their workspace details
+      allow read: if isWorkspaceMember(workspaceId);
+
+      // Authenticated users can create a workspace if they are the declared owner
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerUid == request.auth.uid &&
+        request.resource.data.id == workspaceId;
+
+      // Only workspace owner or admin can update workspace settings/details
+      allow update: if hasWorkspaceRole(workspaceId, ['owner', 'admin']) &&
+        // Owner UID and Workspace ID cannot be mutated
+        request.resource.data.ownerUid == resource.data.ownerUid &&
+        request.resource.data.id == resource.data.id;
+
+      // Only owner can delete workspace
+      allow delete: if isWorkspaceOwner(workspaceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Memberships Collection
+    // -------------------------------------------------------------------------
+    match /memberships/{membershipId} {
+      // User can read their own memberships, or members can list colleagues in their workspace
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid ||
+        isWorkspaceMember(resource.data.workspaceId)
+      );
+
+      // Create allowed if:
+      // 1. Initial workspace owner registration on onboarding
+      // 2. Or existing workspace owner adding a team member
+      allow create: if isAuthenticated() && (
+        (request.resource.data.userId == request.auth.uid &&
+         request.resource.data.role == 'owner' &&
+         request.resource.id == membershipDocId(request.resource.data.workspaceId, request.auth.uid)) ||
+        isWorkspaceOwner(request.resource.data.workspaceId)
+      );
+
+      // Only workspace owner can update roles/permissions (prevents self-elevation)
+      allow update: if isAuthenticated() &&
+        isWorkspaceOwner(resource.data.workspaceId) &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+
+      // Only workspace owner can delete/revoke membership
+      allow delete: if isAuthenticated() &&
+        isWorkspaceOwner(resource.data.workspaceId);
+    }
+
+    // -------------------------------------------------------------------------
+    // Subscriptions Collection (Privileged - Protected against tampering)
+    // -------------------------------------------------------------------------
+    match /subscriptions/{subscriptionId} {
+      // Workspace members can view their active plan and limits
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+
+      // Clients can ONLY initialize the default Free Starter plan on initial creation
+      allow create: if isAuthenticated() &&
+        request.resource.data.planId == 'free' &&
+        request.resource.data.priceUSD == 0 &&
+        request.resource.data.workspaceId != null &&
+        isWorkspaceOwner(request.resource.data.workspaceId);
+
+      // Paid upgrades and plan updates CANNOT be written by client SDK!
+      // Must be performed by Firebase Admin SDK in Cloud Functions after verified payment.
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Tenant Isolated Data (Audit notes, products, sales, etc.)
+    // -------------------------------------------------------------------------
+    match /audit_notes/{noteId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isAuthenticated() &&
+        isWorkspaceMember(request.resource.data.workspaceId) &&
+        request.resource.data.authorUid == request.auth.uid;
+      allow update: if isAuthenticated() &&
+        isWorkspaceMember(resource.data.workspaceId) &&
+        (resource.data.authorUid == request.auth.uid || isWorkspaceOwner(resource.data.workspaceId));
+      allow delete: if hasWorkspaceRole(resource.data.workspaceId, ['owner', 'admin']);
+    }
+
+    // Generic multi-tenant business entities pattern
+    match /{entityCollection}/{entityId} {
+      allow read: if isWorkspaceMember(resource.data.workspaceId);
+      allow create: if isWorkspaceMember(request.resource.data.workspaceId);
+      allow update: if isWorkspaceMember(resource.data.workspaceId) &&
+        request.resource.data.workspaceId == resource.data.workspaceId;
+      allow delete: if hasWorkspaceRole(resource.data.workspaceId, ['owner', 'admin']);
+    }
+  }
+}
