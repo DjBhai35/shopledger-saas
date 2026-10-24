@@ -13,10 +13,14 @@ import {
   SupplierLedgerEntry,
   Expense,
   OperationJournalRecord,
+  PaymentProof,
+  PaymentHistoryRecord,
+  AppPlatformSettings,
+  UserProfile,
 } from "@/types";
 
 const DB_NAME = "shopledger_local_db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 export interface ShopLedgerDBSchema extends DBSchema {
   workspaces: {
@@ -129,6 +133,34 @@ export interface ShopLedgerDBSchema extends DBSchema {
       updatedAt: number;
     };
   };
+  payment_proofs: {
+    key: string;
+    value: PaymentProof;
+    indexes: {
+      by_workspace: string;
+      by_status: string;
+      by_txhash: string;
+    };
+  };
+  payment_history: {
+    key: string;
+    value: PaymentHistoryRecord;
+    indexes: {
+      by_workspace: string;
+      by_created: number;
+    };
+  };
+  platform_settings: {
+    key: string;
+    value: AppPlatformSettings;
+  };
+  all_users: {
+    key: string;
+    value: UserProfile;
+    indexes: {
+      by_email: string;
+    };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<ShopLedgerDBSchema>> | null = null;
@@ -224,6 +256,29 @@ export function getLocalDB(): Promise<IDBPDatabase<ShopLedgerDBSchema>> {
         if (!db.objectStoreNames.contains("operation_journal")) {
           const store = db.createObjectStore("operation_journal", { keyPath: "id" });
           store.createIndex("by_workspace", "workspaceId");
+        }
+
+        // Version 3 stores (USDT Crypto Payments, Admin Platform)
+        if (!db.objectStoreNames.contains("payment_proofs")) {
+          const store = db.createObjectStore("payment_proofs", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_status", "status");
+          store.createIndex("by_txhash", "txHash");
+        }
+
+        if (!db.objectStoreNames.contains("payment_history")) {
+          const store = db.createObjectStore("payment_history", { keyPath: "id" });
+          store.createIndex("by_workspace", "workspaceId");
+          store.createIndex("by_created", "recordedAt");
+        }
+
+        if (!db.objectStoreNames.contains("platform_settings")) {
+          db.createObjectStore("platform_settings", { keyPath: "id" });
+        }
+
+        if (!db.objectStoreNames.contains("all_users")) {
+          const store = db.createObjectStore("all_users", { keyPath: "uid" });
+          store.createIndex("by_email", "email");
         }
       },
     });

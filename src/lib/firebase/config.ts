@@ -35,4 +35,4 @@ googleProvider.setCustomParameters({
   prompt: "select_account",
 });
 
-export { app, auth, db, firebaseConfig };
+export { app, auth, db, db as firestoreDb, firebaseConfig };

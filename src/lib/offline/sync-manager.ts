@@ -340,6 +340,10 @@ class OfflineSyncService {
         return "supplier_ledger";
       case "stock_movement":
         return "stock_movements";
+      case "payment_proof":
+        return "payment_proofs";
+      case "platform_settings":
+        return "platform_settings";
       case "audit_note":
         return "audit_notes";
       default:

@@ -5,6 +5,8 @@ import Link from "next/navigation";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/firebase/auth-context";
 import { OfflineStatusIndicator } from "./OfflineStatusIndicator";
+import { WhatsAppSupportButton } from "./WhatsAppSupportButton";
+import { isUserAdmin } from "@/lib/services/platformSettingsService";
 import {
   LayoutDashboard,
   Package,
@@ -25,7 +27,9 @@ import {
   Building2,
   ChevronRight,
   ShieldCheck,
+  Shield,
   AlertCircle,
+  Lock,
 } from "lucide-react";
 
 interface NavItem {
@@ -59,6 +63,19 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const isAdmin = isUserAdmin(userProfile);
+
+  // Dynamic nav items including Platform Admin if user has super admin privileges
+  const navItems = [...NAV_ITEMS];
+  if (isAdmin && !navItems.some((i) => i.href === "/dashboard/admin")) {
+    navItems.splice(11, 0, {
+      name: "Platform Admin",
+      href: "/dashboard/admin",
+      icon: Shield,
+      isOperational: true,
+    });
+  }
+
   const handleNavClick = (item: NavItem, e: React.MouseEvent) => {
     if (!item.isOperational) {
       e.preventDefault();
@@ -69,8 +86,36 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Blocked account screen
+  if (userProfile?.isBlocked) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl animate-in zoom-in-95">
+          <div className="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+            <Lock className="w-8 h-8" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-900">Account Suspended</h1>
+          <p className="text-xs text-slate-600 leading-relaxed">
+            {userProfile.blockedReason || "Your account has been suspended by the platform administrator."}
+          </p>
+          <div className="pt-2">
+            <WhatsAppSupportButton mode="inline" />
+          </div>
+          <div className="pt-4 border-t border-slate-100">
+            <button
+              onClick={() => signOut()}
+              className="text-xs text-slate-500 hover:text-slate-800 font-semibold"
+            >
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row">
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row relative">
       {/* Mobile Top Header */}
       <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-2">
@@ -132,7 +177,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
           {/* Navigation Links */}
           <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
 
@@ -274,6 +319,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       )}
+
+      {/* Floating WhatsApp Support Button */}
+      <WhatsAppSupportButton mode="floating" />
     </div>
   );
 }

@@ -32,6 +32,10 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   currentWorkspaceId?: string | null;
+  isSuperAdmin?: boolean;
+  isBlocked?: boolean;
+  blockedReason?: string;
+  blockedAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -131,6 +135,78 @@ export interface WorkspaceSubscription {
   limits: SubscriptionLimits;
   autoRenew: boolean;
   updatedAt: number;
+}
+
+// =============================================================================
+// CRYPTO PAYMENTS & ADMIN PLATFORM TYPES (Prompt 3)
+// =============================================================================
+
+export type CryptoNetwork = "TRC20" | "BEP20";
+
+export type PaymentProofStatus = "pending" | "approved" | "rejected";
+
+export interface PaymentProof {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  userUid: string;
+  userEmail: string | null;
+  userDisplayName?: string | null;
+  planId: SubscriptionPlanId;
+  planName: string;
+  amountUSD: number;
+  network: CryptoNetwork;
+  txHash: string;
+  depositAddress: string;
+  status: PaymentProofStatus;
+  userNotes?: string;
+  submittedAt: number;
+  reviewedAt?: number;
+  reviewedByUid?: string;
+  reviewedByEmail?: string;
+  adminNotes?: string;
+  rejectionReason?: string;
+}
+
+export interface PaymentHistoryRecord {
+  id: string;
+  workspaceId: string;
+  paymentProofId?: string;
+  planId: SubscriptionPlanId;
+  planName: string;
+  amountUSD: number;
+  network?: CryptoNetwork;
+  txHash?: string;
+  periodStart: number;
+  periodEnd: number;
+  durationMonths: number;
+  status: "completed" | "refunded";
+  recordedAt: number;
+  approvedByUid: string;
+}
+
+export interface AppPlatformSettings {
+  id: string;
+  platformName: string;
+  supportEmail: string;
+  whatsappNumber: string;
+  whatsappDefaultMessage: string;
+  announcementMessage?: string;
+  announcementActive?: boolean;
+  trc20WalletAddress: string;
+  bep20WalletAddress: string;
+  usdtInstructionsNotes?: string;
+  adminEmails: string[];
+  updatedAt: number;
+  updatedByUid?: string;
+}
+
+export interface PlatformConfiguredPlan extends PricingPlan {
+  isActive: boolean;
+}
+
+export interface PlatformConfiguredCategory extends BusinessCategory {
+  isEnabled: boolean;
 }
 
 // =============================================================================
@@ -504,6 +580,8 @@ export type SyncEntityType =
   | "supplier_payment"
   | "stock_movement"
   | "expense"
+  | "payment_proof"
+  | "platform_settings"
   | "audit_note"
   | "setting";
 
