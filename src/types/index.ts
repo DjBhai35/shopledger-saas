@@ -209,6 +209,26 @@ export interface PlatformConfiguredCategory extends BusinessCategory {
   isEnabled: boolean;
 }
 
+export type AdminAuditAction =
+  | "approve_payment"
+  | "reject_payment"
+  | "block_user"
+  | "unblock_user"
+  | "update_platform_settings"
+  | "update_plans"
+  | "update_categories";
+
+export interface AdminAuditLog {
+  id: string;
+  adminUid: string;
+  adminEmail: string;
+  action: AdminAuditAction;
+  targetType: "payment_proof" | "user" | "platform_settings" | "pricing_plans" | "categories";
+  targetId: string;
+  details: Record<string, unknown>;
+  timestamp: number;
+}
+
 // =============================================================================
 // PRODUCTS & INVENTORY TYPES (Prompt 2)
 // =============================================================================
@@ -583,6 +603,7 @@ export type SyncEntityType =
   | "payment_proof"
   | "platform_settings"
   | "audit_note"
+  | "admin_audit_log"
   | "setting";
 
 export interface SyncQueueItem {

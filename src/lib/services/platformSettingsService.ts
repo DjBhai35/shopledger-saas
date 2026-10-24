@@ -3,6 +3,7 @@ import { AppPlatformSettings } from "@/types";
 import { syncManager } from "@/lib/offline/sync-manager";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestoreDb, isFirebaseConfigured } from "@/lib/firebase/config";
+import { recordAdminAuditLog } from "./auditLogService";
 
 export const DEFAULT_PLATFORM_SETTINGS: AppPlatformSettings = {
   id: "default",
@@ -128,6 +129,17 @@ export async function updatePlatformSettings(
     entityType: "platform_settings",
     entityId: "default",
     payload: updated as unknown as Record<string, unknown>,
+  });
+
+  await recordAdminAuditLog({
+    adminUid: authorUid,
+    adminEmail: updated.adminEmails?.[0] || "admin@shopledger.app",
+    action: "update_platform_settings",
+    targetType: "platform_settings",
+    targetId: "default",
+    details: {
+      updatedKeys: Object.keys(updates),
+    },
   });
 
   return updated;

@@ -274,5 +274,14 @@ service cloud.firestore {
       allow create: if isWorkspaceMember(request.resource.data.workspaceId);
       allow update, delete: if false; // Immutable idempotency journal
     }
+
+    // -------------------------------------------------------------------------
+    // Platform Admin Audit Logs (Immutable)
+    // -------------------------------------------------------------------------
+    match /admin_audit_logs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSuperAdmin();
+      allow update, delete: if false; // Strictly immutable audit log
+    }
   }
 }

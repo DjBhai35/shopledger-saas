@@ -203,32 +203,42 @@ Open [http://localhost:3000](http://localhost:3000) to view the application.
 ```bash
 npm test
 ```
-Executes all 14 Vitest test suites across Products, POS Sales, Purchases, Ledgers, Reports, USDT Payments, Admin Security, and Offline Engines:
+Executes all 15 Vitest test suites across Products, POS Sales, Purchases, Ledgers, Reports, USDT Payments, Admin Security, Immutable Audit Logs, and Offline Sync Engines:
 ```text
- ✓ src/tests/ledger-expenses.test.ts (5 tests)
  ✓ src/tests/usdt-payments.test.ts (8 tests)
+ ✓ src/tests/admin-audit.test.ts (8 tests)
  ✓ src/tests/sales-pos.test.ts (5 tests)
- ✓ src/tests/purchases.test.ts (3 tests)
+ ✓ src/tests/ledger-expenses.test.ts (5 tests)
  ✓ src/tests/subscription-lifecycle.test.ts (5 tests)
- ✓ src/tests/reports.test.ts (1 test)
+ ✓ src/tests/purchases.test.ts (3 tests)
  ✓ src/tests/subscription-limits.test.ts (2 tests)
+ ✓ src/tests/reports.test.ts (1 test)
  ✓ src/tests/admin-security.test.ts (6 tests)
  ✓ src/tests/offline-sync.test.ts (6 tests)
  ✓ src/tests/offline-journal.test.ts (3 tests)
  ✓ src/tests/products.test.ts (4 tests)
- ✓ src/tests/workspace-tenant.test.ts (2 tests)
  ✓ src/tests/pricing.test.ts (3 tests)
  ✓ src/tests/categories.test.ts (4 tests)
+ ✓ src/tests/workspace-tenant.test.ts (2 tests)
 
- Test Files  14 passed (14)
-      Tests  57 passed (57)
+ Test Files  15 passed (15)
+      Tests  65 passed (65)
 ```
 
 ### 6. Production Build
 ```bash
 npm run build
 ```
-Compiles and optimizes all 26 static and dynamic routes.
+Compiles and optimizes all 27 static and dynamic production routes cleanly with 0 type errors.
+
+---
+
+## 📱 Progressive Web App (PWA) & Android Packaging
+
+ShopLedger SaaS is built with an offline-first PWA architecture including:
+- Service Worker (`public/sw.js`) with cache-first and stale-while-revalidate strategies.
+- Web App Manifest (`public/manifest.json`) configured for `standalone` display and custom branding.
+- Full step-by-step documentation for compiling into a native Android bundle (`.aab`) or APK (`.apk`) via Google's official Bubblewrap CLI (Trusted Web Activity - TWA) or Ionic Capacitor in [`docs/ANDROID_PACKAGING.md`](./docs/ANDROID_PACKAGING.md).
 
 ---
 

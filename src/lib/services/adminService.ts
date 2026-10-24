@@ -12,6 +12,7 @@ import { BUSINESS_CATEGORIES } from "@/lib/config/categories";
 import { isUserAdmin } from "./platformSettingsService";
 import { doc, getDoc, setDoc, collection, getDocs, updateDoc } from "firebase/firestore";
 import { firestoreDb, isFirebaseConfigured } from "@/lib/firebase/config";
+import { recordAdminAuditLog } from "./auditLogService";
 
 /**
  * List all registered user profiles across the platform.
@@ -131,6 +132,18 @@ export async function toggleUserBlockedStatus(params: {
     }
   }
 
+  await recordAdminAuditLog({
+    adminUid: params.adminUser.uid,
+    adminEmail: params.adminUser.email || "admin@shopledger.app",
+    action: params.isBlocked ? "block_user" : "unblock_user",
+    targetType: "user",
+    targetId: params.targetUid,
+    details: {
+      isBlocked: params.isBlocked,
+      blockedReason: updated.blockedReason,
+    },
+  });
+
   return updated;
 }
 
@@ -204,6 +217,18 @@ export async function updateConfiguredPricingPlans(params: {
     }
   }
 
+  await recordAdminAuditLog({
+    adminUid: params.adminUser.uid,
+    adminEmail: params.adminUser.email || "admin@shopledger.app",
+    action: "update_plans",
+    targetType: "pricing_plans",
+    targetId: "pricing",
+    details: {
+      plansCount: params.plans.length,
+      planIds: params.plans.map((p) => p.id),
+    },
+  });
+
   return params.plans;
 }
 
@@ -275,6 +300,18 @@ export async function updateConfiguredCategories(params: {
       // Offline fallback
     }
   }
+
+  await recordAdminAuditLog({
+    adminUid: params.adminUser.uid,
+    adminEmail: params.adminUser.email || "admin@shopledger.app",
+    action: "update_categories",
+    targetType: "categories",
+    targetId: "categories",
+    details: {
+      categoriesCount: params.categories.length,
+      enabledCount: params.categories.filter((c) => c.isEnabled).length,
+    },
+  });
 
   return params.categories;
 }

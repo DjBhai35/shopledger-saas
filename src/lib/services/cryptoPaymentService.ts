@@ -13,6 +13,7 @@ import { getPlatformSettings, isUserAdmin } from "./platformSettingsService";
 import { syncManager } from "@/lib/offline/sync-manager";
 import { firestoreDb, isFirebaseConfigured } from "@/lib/firebase/config";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { recordAdminAuditLog } from "./auditLogService";
 
 export interface SubmitPaymentProofInput {
   workspaceId: string;
@@ -381,6 +382,25 @@ export async function approvePaymentProof(params: {
     payload: updatedProof as unknown as Record<string, unknown>,
   });
 
+  // 8. Immutable Admin Audit Log
+  await recordAdminAuditLog({
+    adminUid: params.adminUser.uid,
+    adminEmail: params.adminUser.email || "admin@shopledger.app",
+    action: "approve_payment",
+    targetType: "payment_proof",
+    targetId: proof.id,
+    details: {
+      workspaceId: proof.workspaceId,
+      planId: proof.planId,
+      amountUSD: proof.amountUSD,
+      network: proof.network,
+      txHash: proof.txHash,
+      startDate,
+      expiryDate,
+      adminNotes: params.adminNotes,
+    },
+  });
+
   return {
     paymentProof: updatedProof,
     subscription: updatedSubscription,
@@ -440,6 +460,23 @@ export async function rejectPaymentProof(params: {
     entityType: "payment_proof",
     entityId: updatedProof.id,
     payload: updatedProof as unknown as Record<string, unknown>,
+  });
+
+  // Immutable Admin Audit Log
+  await recordAdminAuditLog({
+    adminUid: params.adminUser.uid,
+    adminEmail: params.adminUser.email || "admin@shopledger.app",
+    action: "reject_payment",
+    targetType: "payment_proof",
+    targetId: proof.id,
+    details: {
+      workspaceId: proof.workspaceId,
+      planId: proof.planId,
+      amountUSD: proof.amountUSD,
+      network: proof.network,
+      txHash: proof.txHash,
+      rejectionReason: params.rejectionReason,
+    },
   });
 
   return updatedProof;

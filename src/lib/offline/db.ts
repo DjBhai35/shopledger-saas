@@ -17,10 +17,11 @@ import {
   PaymentHistoryRecord,
   AppPlatformSettings,
   UserProfile,
+  AdminAuditLog,
 } from "@/types";
 
 const DB_NAME = "shopledger_local_db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export interface ShopLedgerDBSchema extends DBSchema {
   workspaces: {
@@ -161,6 +162,15 @@ export interface ShopLedgerDBSchema extends DBSchema {
       by_email: string;
     };
   };
+  admin_audit_logs: {
+    key: string;
+    value: AdminAuditLog;
+    indexes: {
+      by_admin: string;
+      by_action: string;
+      by_timestamp: number;
+    };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<ShopLedgerDBSchema>> | null = null;
@@ -279,6 +289,14 @@ export function getLocalDB(): Promise<IDBPDatabase<ShopLedgerDBSchema>> {
         if (!db.objectStoreNames.contains("all_users")) {
           const store = db.createObjectStore("all_users", { keyPath: "uid" });
           store.createIndex("by_email", "email");
+        }
+
+        // Version 4 stores (Admin Audit Logging)
+        if (!db.objectStoreNames.contains("admin_audit_logs")) {
+          const store = db.createObjectStore("admin_audit_logs", { keyPath: "id" });
+          store.createIndex("by_admin", "adminUid");
+          store.createIndex("by_action", "action");
+          store.createIndex("by_timestamp", "timestamp");
         }
       },
     });
